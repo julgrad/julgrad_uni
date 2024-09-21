@@ -1,0 +1,257 @@
+---
+title: "Vienna Vacation Vision: Exploring Airbnb Listings through Data"
+author: "Julian Gradziel"
+date: "2024-01-09"
+output:
+  html_document:
+    df_print: paged
+---
+
+In this work we're going to analyze a dataset which focuses on airbnb apartments available for rental. With a couple of graphical visualizations of this dataset we will get a clear overview of different relationships occurring within it, and some general information that will be helpful to get a full picture of temporary accommodation within Vienna's borders.  
+The first visualization will show us the prices - how many apartments are there in a specific price range. This tool may be helpful to not only get a general picture of the prices in Vienna, but also it will allow to compare it with other cities.
+
+```{r}
+#libraries
+library(ggplot2)
+library(plotly)
+library(dplyr)
+
+setwd("C:/Users/julia/Desktop/na pendrive/data for R")
+data <- read.csv('airbnbdata.csv')
+
+data$price <- as.numeric(gsub("[^0-9.]", "", data$price))
+
+#histogram
+p = ggplot(data, aes(x = price)) +
+    geom_histogram(bins = 30, fill = "#FF9999", color = "#E31A1C", alpha = 0.7) +
+    labs(title = "Histogram of Prices", x = "Price ($)", y = "Count") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.title.x = element_text(color = "blue", size = 12),
+          axis.title.y = element_text(color = "blue", size = 12),
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid.major = element_line(color = "gray", linetype = "dotted"),
+          panel.grid.minor = element_blank()) +
+    xlim(0, 1000)
+
+#Convert
+ggplotly(p)
+
+```
+The histogram clearly shows that the biggest share of apartments are in $0-$250 range. Nevertheless there are a lot of outliers that are much more expensive, influencing that the histogram is right-skewed. In fact we had to set a higher bound of $1000, because there were so many of them.  
+The second factor that would be very important for us when choosing a place to stay, is how much people can it fit. In order to find out, we'll plot a boxplot that will help us to draw some conclusions in this matter.
+
+```{r}
+library(ggplot2)
+
+
+# boxplot
+ggplot(data, aes(x = "", y = accommodates)) +
+    geom_boxplot(fill = "lightblue", color = "darkblue") +
+    labs(title = "Boxplot of Accommodates", y = "Accommodates", x = "") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank())
+
+
+
+```
+As you can see, 75% of all of the apartment can only fit up to 4 guests, and the median is equal to 3 guests per apartment. But of course there are multiple outliers, which are also shown above.  
+Now we were curious, whether there is any relation between the price of the apartment and the number of guests that can sleep there. We chose to run linear regression analysis, hoping it will give us sufficient answer for this question.
+```{r}
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(data.table)
+
+setwd("C:/Users/olgun/Desktop/BA2")
+data <- fread('kazior.csv')
+
+data$price <- as.numeric(gsub("[^0-9.]", "", data$price)) # Convert price to numeric
+data <- na.omit(data[, c("accommodates", "price")]) # Assuming these are the column names
+
+#linear model
+model <- lm(price ~ accommodates , data = data)
+
+#outliers
+data$outlier <- abs(resid(model)) > 2 * sd(resid(model))
+
+# Plot
+ggplot(data, aes(x = accommodates, y = price)) +
+    geom_point(aes(color = outlier), size = 3, alpha = 0.6) +
+    geom_smooth(method = "lm", se = TRUE, color = "blue", linetype = "dashed") +
+    scale_color_manual(values = c("black", "red")) +
+    labs(title = "Linear Regression of Price vs. Accommodates",
+         x = "Accommodates",
+         y = "Price ($)",
+         color = "Outlier") +
+    theme_minimal() +
+    theme(legend.position = "bottom",
+          plot.title = element_text(hjust = 0.5),
+          plot.background = element_rect(fill = "ivory"),
+          panel.grid.major = element_line(color = "lightblue"),
+          panel.grid.minor = element_line(color = "lightblue", linetype = "dotted")) +
+    ylim(0, 2500)  # Setting y-axis limits
+
+
+```
+As suspected, there is a noticeably positive relationship between count of guests that can sleep in an apartment and it's price, meaning that the higher number of visitors usually will be connected with higher amount of money that we wil need to spend on it. Here again we had to set an upper bound of $2500, because due to the number of outliers, we wouldn't have gotten a clear picture without it.  
+Now we'd like to take a look at the factors that probably are the most significant 
+for potential visitors, but combined. Those will be price, review score and reviews per month.
+Price is pretty self explanatory, when we're looking for an apartment for a holiday
+the price will be the first thing that we will draw our attention to. Secondly, we're
+interested if the apartment is worth the price, and that's where review score comes in hand. 
+Additionally we decided to include reviews per month factor, as it is probably the best 
+available indicator of the demand for a given apartment - the more reviews it gets per month,
+the higher interest of customers is indicated by it. In order to visualize this relationship,
+we wrote the following code:
+
+
+```{r}
+#libraries
+library(data.table)
+library(ggplot2)
+library(cluster)
+library(plot3D)
+library(RColorBrewer)
+library(data.table)
+
+setwd("C:/Users/olgun/Desktop/BA2")
+data <- fread('kazior.csv')
+data$price <- as.numeric(gsub("[^0-9.]", "", data$price))
+data <- na.omit(data[, .(price, reviews_per_month, review_scores_rating)])
+
+scaled_data <- scale(data)
+
+#Cluster
+hc <- hclust(dist(scaled_data), method = "ward.D2")
+
+clusters <- cutree(hc, 3)
+
+
+data$cluster <- as.factor(clusters)
+
+colors <- brewer.pal(3, "Set1")
+# Convert the cluster factor to a numeric variable
+data$cluster_num <- as.numeric(data$cluster)
+
+#3D
+scatter3D(x = data$price, y = data$reviews_per_month, z = data$review_scores_rating, 
+          colvar = data$cluster_num, col = colors, pch = 19, 
+          xlab = "Price", ylab = "Reviews Per Month", zlab = "Review Scores", 
+          main = "3D Clustering of Airbnb Listings")
+
+```
+
+The biggest group of apartments has relatively higher scores and lower price, but at the same
+time the second biggest group consists of cheaper apartments too, but the reviews were rather negative.
+There is one outlier which has very high review scores, is relatively cheap and at the same time it has extraordinary reviews per month count. The smallest group consists of costly apartments, but it's a bit hard to assess the review scores for them.  
+In order to deal with this issue, we've written a code which will allow us to interact
+with this figure, which will definitely help us to get much better and more precise overview. 
+
+```{r}
+#libraries
+library(shiny)
+library(plotly)
+library(data.table)
+library(cluster)
+
+setwd("C:/Users/olgun/Desktop/BA2")
+data <- fread('kazior.csv')
+data$price <- as.numeric(gsub("[^0-9.]", "", data$price))
+data <- na.omit(data[, .(price, reviews_per_month, review_scores_rating)])
+
+scaled_data <- scale(data)
+
+#Cluster
+hc <- hclust(dist(scaled_data), method = "ward.D2")
+clusters <- cutree(hc, 3)
+data$cluster <- as.factor(clusters)
+
+#UI
+ui <- fluidPage(
+    titlePanel("Interactive 3D Scatter Plot of Airbnb Listings"),
+    plotlyOutput("scatterPlot")
+)
+
+#server
+server <- function(input, output) {
+    output$scatterPlot <- renderPlotly({
+        fig <- plot_ly(data, x = ~price, y = ~reviews_per_month, z = ~review_scores_rating, 
+                       type = 'scatter3d', mode = 'markers',
+                       marker = list(size = 5, color = ~cluster, colorscale = 'Viridis', opacity = 0.8))
+        fig <- fig %>% layout(scene = list(xaxis = list(title = 'Price'),
+                                           yaxis = list(title = 'Reviews Per Month'),
+                                           zaxis = list(title = 'Review Scores')))
+        fig
+    })
+}
+
+#app
+shinyApp(ui = ui, server = server)
+```
+
+
+
+
+
+Now to get a broader picture of the apartment pricing in Vienna, we've created an 
+interactive map that will give  us a clear overview of available apartments for the 
+given price range. This may be a very helpful tool. Firstly, after choosing a price range that would 
+reflect our budget, we get a clear overview of the districts, where we're the most likely to find an accommodation with a satisfying price. Secondly, it simply shows the count of apartments in the districts throughout Vienna, on a condition of course, that we choose the widest price range possible. In order to get this tool, we've written the following code:
+```{r}
+#libraries
+library(shiny)
+library(leaflet)
+library(dplyr)
+
+setwd("C:/Users/olgun/Desktop/BA2")
+data <- read.csv('kazior.csv')
+
+
+data$price <- as.numeric(gsub("[^0-9.]", "", data$price))  # Convert price to numeric
+
+#UI
+ui <- fluidPage(
+    titlePanel("Vienna Airbnb Listings"),
+    sliderInput("priceRange", "Select Price Range:", 
+                min = 0, max = 1000, value = c(0, 1000)),
+    leafletOutput("map")
+)
+
+#Server
+server <- function(input, output) {
+    output$map <- renderLeaflet({
+        leaflet(data) %>% 
+            addTiles() %>%  # Default OpenStreetMap tiles
+            setView(lng = 16.3738, lat = 48.2082, zoom = 12)  # Vienna coordinates
+    })
+
+    observe({
+        filtered_data <- data %>%
+            filter(price >= input$priceRange[1], price <= input$priceRange[2])
+
+        leafletProxy("map", data = filtered_data) %>%
+            clearMarkers() %>%
+            addCircleMarkers(~longitude, ~latitude, popup = ~as.character(price),
+                             radius = 4, fillColor = "#FF5733", fillOpacity = 0.8,
+                             stroke = FALSE, clusterOptions = markerClusterOptions())
+    })
+}
+
+#run
+shinyApp(ui = ui, server = server)
+
+```
+With this map we can confidently say that there are two main regions in Vienna with the highest apartment count. Those will be, as previously mentioned, city center and 10th district - Favoriten. While city center is self explanatory, Favoriten has the pole position in the apartment count. The explanation for it is easy - Favoriten is the most populated district in Vienna with around 200,000 inhabitants. So many residential buildings resulted, that among them there are almost 3300 apartments available for rental. 
+
+
+
+
+
+
+
+
+

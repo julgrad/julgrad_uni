@@ -1,0 +1,133 @@
+---
+title: 'Case study 3: Marketing Data'
+author: "Julian Gradziel"
+date: "2023-11"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Analysis
+
+Before we start with our analysis, we load in the data and have a first look at it.
+```{r}
+setwd("C:/Users/julia/Desktop/na pendrive/data for R")
+marketing <- read.csv("marketing.csv")
+head(marketing)
+```
+
+## Task 1
+### i)
+
+```{r}
+marketing$mineral <- as.factor(marketing$mineral)
+levels(marketing$mineral) <- c("kr","wa","vo", "ju", "ro")
+
+boxplot(marketing$rating~marketing$mineral, xlab="mineral brand", ylab="rating")
+```
+As visualised by the boxplots, our mineral brand `ro` is rated most highly. For the mineral brand `vo` we observe an almost equally as high rating. For both brands we observe a left skewed rating, indicating that few low ratings pull the mean to the left of the median. Given that the interquartile range of our brand `ju` is quite large, we observed mixed opinions by our customers for this brand. Generally the brands `kr`,`wa` and `ju` are rated lower than the other two brands `vo` and `ro` which can be ovserved by the lower median and first quartile value.
+
+
+
+## Task 2
+We perform a linear regression model of `rating` on `mineral`. Our first value `kr` of the variable `mineral` will be used as a baseline.
+
+The model equation is given as
+$$rating =\beta_1*X_{kr} + \beta_2*X_{wa} + \beta_3*X_{vo} + \beta_4*X_{ju} +\beta_5*X_{ro}+\beta_6*X_{Price}+\beta_7*X_{age} + \beta_8*X_{education} + \beta_8*X_{gender} +\beta_9*X_{income} +u$$ where $\mathbb{E}(u|x)=0}$
+```{r}
+rating_model <- lm(rating ~ ., data=marketing)
+summary(rating_model)
+```
+Our values for both multiple$R^2$ and adjusted $R^2$ are approximately 0.35. We can thus say that our model is able to explain 35% of the variation in the data.
+
+
+## Task 3
+
+We access the coefficients for the demographic variables.
+```{r}
+summary(rating_model)$coefficients[c(3,4,5,6),]
+```
+Our estimate for `age` suggests that if our customer is one year older and all other factors are held fixed, the rating is expected to go up by 0.01208 points.
+The estimate for eduction suggests that if the person has a high school diploma or higher education, ceteris paribus, on average, they tend to rate the brand by 0.2569 points lower than otherwise. 
+Similarly, female customers are expected to rate the brand lower by 0.1068 points than male customers, holding all other factors fixed. Our estimate for income suggests that if income is above average, ceteris paribus, the rating is expected to be lower by 0.641 points.
+
+
+
+## Task 4
+
+
+```{r}
+summary(rating_model)$coefficients[c(1,2,7,8,9,10),]
+```
+Our estimates suggest that the difference in the expected rating between the two brands kr and ju is 20.56-0.28799.
+
+### WRONG
+
+## Task 5
+```{r}
+#5
+coefficients <- coef(rating_model)
+
+price <- 30
+age <- 35
+education <- 1 
+gender <- 1  
+income <- 0   
+
+# Since 'vo' is the brand, we set its dummy variable to 1 and others to 0
+mineralwa <- 0
+mineralvo <- 1
+mineralju <- 0
+mineralro <- 0
+
+woman35yr <- coefficients[1] +
+                    coefficients[2] * price +
+                    coefficients[3] * age +
+                    coefficients[4] * education +
+                    coefficients[5] * gender +
+                    coefficients[6] * income +
+                    coefficients[7] * mineralwa +
+                    coefficients[8] * mineralvo +
+                    coefficients[9] * mineralju +
+                    coefficients[10] * mineralro 
+                    
+print(woman35yr)                
+                    
+
+#6a
+
+gender <- 0 
+man35yr <- coefficients[1] +
+                    coefficients[2] * price +
+                    coefficients[3] * age +
+                    coefficients[4] * education +
+                    coefficients[5] * gender +
+                    coefficients[6] * income +
+                    coefficients[7] * mineralwa +
+                    coefficients[8] * mineralvo +
+                    coefficients[9] * mineralju +
+                    coefficients[10] * mineralro 
+                    
+print(man35yr)
+
+#6b
+
+gender <- 1
+income <- 1
+woman35yrinc <- coefficients[1] +
+                    coefficients[2] * price +
+                    coefficients[3] * age +
+                    coefficients[4] * education +
+                    coefficients[5] * gender +
+                    coefficients[6] * income +
+                    coefficients[7] * mineralwa +
+                    coefficients[8] * mineralvo +
+                    coefficients[9] * mineralju +
+                    coefficients[10] * mineralro 
+                    
+print(woman35yrinc)
+```
+
+

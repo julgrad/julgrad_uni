@@ -1,0 +1,10 @@
+There are a lot of other short tasks I did, 
+using various packages such as e.g.:
+-dplyr
+-tidyr
+-dplyr
+-ggplot
+-plotly
+-shiny
+-lm
+etc. etc.
