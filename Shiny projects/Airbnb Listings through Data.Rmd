@@ -1,8 +1,9 @@
 ---
-title: "Vienna Vacation Vision: Exploring Airbnb Listings through Data"
+title: 'Vienna Vacation Vision: Exploring Airbnb Listings through Data'
 author: "Julian Gradziel"
 date: "2024-01-09"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
 ---
@@ -12,11 +13,14 @@ The first visualization will show us the prices - how many apartments are there 
 
 ```{r}
 #libraries
+#install.packages("htmltools")
+#install.packages("plotly")
+
 library(ggplot2)
 library(plotly)
 library(dplyr)
 
-setwd("C:/Users/julia/Desktop/na pendrive/data for R")
+setwd("C:/Users/julia/Desktop/julgrad_uni/MAIN/Shiny projects")
 data <- read.csv('airbnbdata.csv')
 
 data$price <- as.numeric(gsub("[^0-9.]", "", data$price))
@@ -66,8 +70,8 @@ library(dplyr)
 library(plotly)
 library(data.table)
 
-setwd("C:/Users/olgun/Desktop/BA2")
-data <- fread('kazior.csv')
+setwd("C:/Users/julia/Desktop/Coverletters")
+data <- read.csv('airbnbdata.csv')
 
 data$price <- as.numeric(gsub("[^0-9.]", "", data$price)) # Convert price to numeric
 data <- na.omit(data[, c("accommodates", "price")]) # Assuming these are the column names
@@ -118,10 +122,12 @@ library(plot3D)
 library(RColorBrewer)
 library(data.table)
 
-setwd("C:/Users/olgun/Desktop/BA2")
-data <- fread('kazior.csv')
+setwd("C:/Users/julia/Desktop/julgrad_uni/MAIN/Shiny projects")
+data <- read.csv('airbnbdata.csv')
 data$price <- as.numeric(gsub("[^0-9.]", "", data$price))
-data <- na.omit(data[, .(price, reviews_per_month, review_scores_rating)])
+data <- data %>%
+  select(price, reviews_per_month, review_scores_rating) %>%
+  na.omit()
 
 scaled_data <- scale(data)
 
@@ -158,10 +164,12 @@ library(plotly)
 library(data.table)
 library(cluster)
 
-setwd("C:/Users/olgun/Desktop/BA2")
-data <- fread('kazior.csv')
+setwd("C:/Users/julia/Desktop/julgrad_uni/MAIN/Shiny projects")
+data <- read.csv('airbnbdata.csv')
 data$price <- as.numeric(gsub("[^0-9.]", "", data$price))
-data <- na.omit(data[, .(price, reviews_per_month, review_scores_rating)])
+data <- data %>%
+  select(price, reviews_per_month, review_scores_rating) %>%
+  na.omit()
 
 scaled_data <- scale(data)
 
@@ -190,7 +198,7 @@ server <- function(input, output) {
 }
 
 #app
-shinyApp(ui = ui, server = server)
+#shinyApp(ui = ui, server = server)
 ```
 
 
@@ -207,8 +215,8 @@ library(shiny)
 library(leaflet)
 library(dplyr)
 
-setwd("C:/Users/olgun/Desktop/BA2")
-data <- read.csv('kazior.csv')
+setwd("C:/Users/julia/Desktop/julgrad_uni/MAIN/Shiny projects")
+data <- read.csv('airbnbdata.csv')
 
 
 data$price <- as.numeric(gsub("[^0-9.]", "", data$price))  # Convert price to numeric
@@ -242,7 +250,7 @@ server <- function(input, output) {
 }
 
 #run
-shinyApp(ui = ui, server = server)
+#shinyApp(ui = ui, server = server)
 
 ```
 With this map we can confidently say that there are two main regions in Vienna with the highest apartment count. Those will be, as previously mentioned, city center and 10th district - Favoriten. While city center is self explanatory, Favoriten has the pole position in the apartment count. The explanation for it is easy - Favoriten is the most populated district in Vienna with around 200,000 inhabitants. So many residential buildings resulted, that among them there are almost 3300 apartments available for rental. 
