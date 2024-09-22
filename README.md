@@ -1,5 +1,5 @@
 # 3 Projects done during university
-# Shiny Projects
+# P1: Shiny Projects
 This repository features a comprehensive analysis of Airbnb listings using R and includes interactive Shiny applications to visualize the data. This project integrates data manipulation, statistical analysis, and interactive visualization, demonstrating the use of advanced R programming techniques and libraries.
 
 ## Repository Contents
@@ -24,7 +24,7 @@ This repository features a comprehensive analysis of Airbnb listings using R and
   - **Interactive Map**: Developed using `leaflet` to display geographic data interactively.
  
   
-# Project_LoretzGini
+# P2: Project_LoretzGini
 R project that delves into the analysis of economic inequality through the Lorenz Curve and Gini Coefficient calculations. Additionally, it explores an agent-based model for simulating economic interactions and welfare distribution.
 
 ## Files
@@ -42,7 +42,7 @@ R project that delves into the analysis of economic inequality through the Loren
 - **Agent-based Modeling**: Simulates economic transactions to study the effects on wealth distribution.
 - **Monte Carlo Simulation**: Used to project the impact of different economic parameters over multiple iterations.
 
-# Data Analysis
+# P3: Data Analysis
  R project focusing on statistical data analysis techniques using several complex R libraries and functions to derive insights from various datasets.
 ## Libraries Used
 - `dplyr`: For data manipulation.
