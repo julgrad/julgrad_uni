@@ -1,5 +1,7 @@
-# Welcome to GitHub Desktop!
+# 3 Projects done during university
 
-This is your README. READMEs are where you can communicate what your project is and how to use it.
+# Shiny Projects
 
-Write your name on line 6, save it, and then head back to GitHub Desktop.
+# Project_LoretzGini
+
+# Data Analysis
