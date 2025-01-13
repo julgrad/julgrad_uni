@@ -5,183 +5,28 @@ date: "2024-11-02"
 output: pdf_document
 ---
 
-```{r}
-# --- Chunk 2: Read & clean the first data set
-# (Equivalent to pd.read_csv('ovd_EBOE.csv', sep=';') and drop_duplicates in Python)
-
-df <- read_csv2("ovd_EBOE.csv") %>%  # read_csv2 uses semicolon as default sep
-  distinct()                         # remove duplicates
-
-# Rename columns: T_BITA_COB_DT -> cob_dt, AMT -> AMT, CCY_CUST_PRINC -> cur
-df <- df %>%
-  rename(
-    cob_dt = T_BITA_COB_DT,
-    AMT    = AMT,
-    cur    = CCY_CUST_PRINC
-  )
-
-# Convert date columns to Date; adjust format if needed
-df <- df %>%
-  mutate(
-    cob_dt     = as.Date(cob_dt, format="%Y-%m-%d"),
-    DT_ACC_OPN = as.Date(DT_ACC_OPN, format="%Y-%m-%d")
-  )
-
-# If "AMT" has commas, replace with dots & convert to numeric
-df <- df %>%
-  mutate(
-    AMT = gsub(",", ".", AMT),
-    AMT = as.numeric(AMT)
-  )
-
-# Create "first_dt_on" = earliest cob_dt for each GID_CONT
-dfint <- df %>%
-  group_by(GID_CONT) %>%
-  summarise(first_dt_on = min(cob_dt, na.rm=TRUE)) %>%
-  ungroup()
-
-# Merge first_dt_on back to df
-df <- df %>%
-  left_join(dfint, by="GID_CONT")
-
-# Show a few rows (optional)
-head(df)
-
-```
 
 ```{r}
-# --- Chunk 3: Read & filter the second data set
-# (Equivalent to second pd.read_csv('4052_OVD_input.csv', sep=';'))
-
-df <- read_csv2("4052_OVD_input.csv")
-
-# Keep rows: MODEL_ID == '4052_NP_OVD' and FLG_NPE == 'N'
-df <- df %>%
-  filter(MODEL_ID == "4052_NP_OVD", FLG_NPE == "N")
-
-# Show a few rows (optional)
-head(df)
-
-```
-
-```{r}
-# --- Chunk 4: Summarize & pivot wide
-# Sort, group_by, sum, then pivot_wider (equivalent of pivot in Python)
-
-df <- df %>%
-  arrange(cob_dt, cur) %>%
-  group_by(cur, cob_dt, T_BITA_TNT_CD, GID_CONT, DT_ACC_OPN, FLG_NPE, MODEL_ID, first_dt_on) %>%
-  summarise(AMT = sum(AMT, na.rm=TRUE)) %>%
-  ungroup()
-
-df_wide <- df %>%
-  pivot_wider(
-    id_cols     = c(cur, T_BITA_TNT_CD, GID_CONT, DT_ACC_OPN, FLG_NPE, MODEL_ID, first_dt_on),
-    names_from  = cob_dt,
-    values_from = AMT
-  )
-
-# Display the pivoted data (optional)
-df_wide
-
-```
-
-```{r}
-# --- Chunk 5: Create "df_prev_1" which is the same table but shifted by one column
-df_prev_1 <- df_wide
-
-col_names <- colnames(df_wide)
-# Suppose the first 7 columns are ID cols, and the rest are date columns:
-for(i in seq_along(col_names)) {
-  if(i >= 8) {
-    if(i == 8) {
-      # first date column replaced with NA
-      df_prev_1[[col_names[i]]] <- NA
-    } else {
-      # each subsequent date column replaced with the previous
-      df_prev_1[[col_names[i]]] <- df_wide[[col_names[i - 1]]]
-    }
-  }
-}
-
-# Show a few rows (optional)
-head(df_prev_1)
-
-```
-
-```{r}
-# --- Chunk 6: Stack / unpivot both data frames into long form
-df_long <- df_wide %>%
-  pivot_longer(
-    cols = -c(cur, T_BITA_TNT_CD, GID_CONT, DT_ACC_OPN, FLG_NPE, MODEL_ID, first_dt_on),
-    names_to  = "cob_dt",
-    values_to = "AMT"
-  )
-
-df_prev_1_l <- df_prev_1 %>%
-  pivot_longer(
-    cols = -c(cur, T_BITA_TNT_CD, GID_CONT, DT_ACC_OPN, FLG_NPE, MODEL_ID, first_dt_on),
-    names_to  = "cob_dt",
-    values_to = "AMT_prev"
-  )
-
-# Join them so that each row in df_long has a corresponding AMT_prev
-df_long <- df_long %>%
-  left_join(
-    df_prev_1_l,
-    by=c("cur","T_BITA_TNT_CD","GID_CONT","DT_ACC_OPN","FLG_NPE","MODEL_ID","first_dt_on","cob_dt")
-  )
-
-# Show a few rows (optional)
-head(df_long)
-
-```
-
-```{r}
-# --- Chunk 7: Compute changes & new columns (Change_EoM, etc.)
-df_long <- df_long %>%
-  mutate(
-    Change_EoM    = coalesce(AMT, 0) - coalesce(AMT_prev, 0),
-    AMT_INCREASED = if_else(Change_EoM >  0, Change_EoM, 0),
-    AMT_DECREASED = if_else(Change_EoM <  0, Change_EoM, 0),
-    AMT_NB        = if_else(cob_dt == first_dt_on, Change_EoM, 0),
-    AMT_closed    = if_else(is.na(AMT) & AMT_prev > 0, AMT_prev, 0)
-  )
-
-head(df_long)
-
-```
-
-```{r}
-# --- Chunk 8: Aggregate & final results
-df_agg <- df_long %>%
-  group_by(cur, cob_dt, MODEL_ID) %>%
-  summarise(
-    AMT            = sum(AMT, na.rm=TRUE),
-    AMT_prev       = sum(AMT_prev, na.rm=TRUE),
-    Change_EoM     = sum(Change_EoM, na.rm=TRUE),
-    AMT_INCREASED  = sum(AMT_INCREASED, na.rm=TRUE),
-    AMT_DECREASED  = sum(AMT_DECREASED, na.rm=TRUE),
-    AMT_NB         = sum(AMT_NB, na.rm=TRUE),
-    AMT_closed     = sum(AMT_closed, na.rm=TRUE)
-  ) %>%
-  ungroup() %>%
-  arrange(desc(cur), desc(cob_dt)) %>%
-  mutate(
-    CheckChangeSum = AMT - AMT_prev
-  )
-
-# In Python, a final step zeroes out a few columns in row 0:
-if(nrow(df_agg) > 0) {
-  df_agg[1, c("Change_EoM", "AMT_INCREASED", "AMT_DECREASED", "CheckChangeSum")] <- 0
-}
-
-# Show final aggregated DataFrame
-df_agg
-
-```
-
-```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(purrr)
+library(tibble)
+library(stringr)
+library(lubridate)
+library(forcats)
+library(reshape2)
+library(data.table)
+library(caret)
+library(randomForest)
+library(xgboost)
+library(shiny)
+library(plotly)
+library(leaflet)
+library(RColorBrewer)
+library(knitr)
+library(rmarkdown)
 
 ```
 
