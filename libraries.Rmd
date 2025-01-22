@@ -4,8 +4,6 @@ author: "Julian Gradziel"
 date: "2024-11-02"
 output: pdf_document
 ---
-
-
 ```{r}
 library(ggplot2)
 library(dplyr)
@@ -51,14 +49,470 @@ library(rmarkdown)
 ```
 
 ```{r}
+```{r}
+library(data.table)
+
+#--- 1) Set working directory
+setwd("M:/OE0836/OE0709_shared/OVD/Christian - calibration")
+
+#--- 2) Read first CSV and drop duplicates
+df <- fread("ovd_EBOE.csv", sep=";", header=TRUE)
+df <- unique(df)  # Removes duplicates
+
+#--- 3) Rename columns to match your Python code
+setnames(df,
+         old  = c("T_BITA_COB_DT", "AMT_CUST_PRINC", "CCY_CUST_PRINC"),
+         new  = c("cob_dt",        "AMT",            "cur"))
+
+#--- 4) Convert date columns (adjust “tryFormats” to suit your data)
+df[, cob_dt     := as.IDate(cob_dt,     tryFormats = c("%Y-%m-%d","%d/%m/%Y"))]
+df[, DT_ACC_OPN := as.IDate(DT_ACC_OPN, tryFormats = c("%Y-%m-%d","%d/%m/%Y"))]
+
+#--- 5) Convert AMT from “X,Y” to numeric
+df[, AMT := as.numeric(gsub(",", ".", AMT))]
+
+#--- 6) Compute the “first_dt_on” per GID_CONT (similar to groupby min)
+dfint <- df[, .(first_dt_on = min(cob_dt, na.rm=TRUE)), by=GID_CONT]
+df <- merge(df, dfint, by="GID_CONT", all.x=TRUE)
+
+#--- 7) Now read the second dataset
+df <- fread("4052_OVD_input.csv", sep=";")
+
+#--- 8) Filter rows
+df <- df[MODEL_ID == "4052_NP_OVD"]
+df <- df[FLG_NPE == "N"]
+
+#--- 9) Sort by cob_dt & cur
+setorder(df, cob_dt, cur)
+
+#--- 10) Sum AMT by group (like df.groupby(...).sum() in Python)
+df <- df[ , .(AMT = sum(AMT, na.rm=TRUE)),
+           by=.(cur, cob_dt, T_BITA_TNT_CD, GID_CONT,
+                DT_ACC_OPN, FLG_NPE, MODEL_ID, first_dt_on)]
+setorder(df, cur, cob_dt)
+
+#--- 11) Pivot wider (like Pandas pivot_table)
+index_cols <- c("cur", "T_BITA_TNT_CD", "GID_CONT",
+                "DT_ACC_OPN", "FLG_NPE", "MODEL_ID", "first_dt_on")
+df_wide <- dcast(df,
+                 formula   = paste(paste(index_cols, collapse="+"), "~ cob_dt"),
+                 value.var = "AMT")
+
+#--- 12) Make a “previous” version shifted by 1 (df_prev_1 in Python)
+df_wide_prev <- copy(df_wide)
+value_cols   <- setdiff(names(df_wide), index_cols)
+
+# Shift each date‐column of AMT by 1 so the first becomes NA
+df_wide_prev[, (value_cols) := shift(.SD, n=1, fill=NA, type="lag"),
+             .SDcols = value_cols]
+
+#--- 13) Melt (long‐form) so we can do the same "stack" style as Python
+df_prev_1 <- melt(df_wide_prev,
+                  id.vars        = index_cols,
+                  variable.name  = "cob_dt",
+                  value.name     = "AMT_prev")
+df_melted  <- melt(df_wide,
+                   id.vars        = index_cols,
+                   variable.name  = "cob_dt",
+                   value.name     = "AMT")
+
+# Convert cob_dt back to Date/IDate (it becomes character on melt)
+df_prev_1[, cob_dt := as.IDate(cob_dt)]
+df_melted[,  cob_dt := as.IDate(cob_dt)]
+
+# Combine them by matching keys (cob_dt etc.)
+df <- merge(df_melted, df_prev_1,
+            by = c(index_cols, "cob_dt"),
+            all.x = TRUE)
+
+#--- 14) Replicate the Python difference columns
+df[, Change_EoM    := fifelse(is.na(AMT), 0, AMT) -
+                        fifelse(is.na(AMT_prev), 0, AMT_prev)]
+df[, AMT_INCREASED := fifelse(Change_EoM > 0, Change_EoM, 0)]
+df[, AMT_DECREASED := fifelse(Change_EoM < 0, Change_EoM, 0)]
+df[, AMT_NB        := fifelse(cob_dt == first_dt_on, Change_EoM, 0)]
+df[, AMT_closed    := fifelse(is.na(AMT) & !is.na(AMT_prev) & AMT_prev > 0,
+                              AMT_prev, 0)]
+
+#--- 15) Aggregate sums by (cur, cob_dt, MODEL_ID), exactly like Python
+df_agg <- df[,
+  .( AMT           = sum(AMT,           na.rm=TRUE),
+     AMT_prev      = sum(AMT_prev,      na.rm=TRUE),
+     Change_EoM    = sum(Change_EoM,    na.rm=TRUE),
+     AMT_INCREASED = sum(AMT_INCREASED, na.rm=TRUE),
+     AMT_DECREASED = sum(AMT_DECREASED, na.rm=TRUE),
+     AMT_NB        = sum(AMT_NB,        na.rm=TRUE),
+     AMT_closed    = sum(AMT_closed,    na.rm=TRUE)
+  ),
+  by = .(cur, cob_dt, MODEL_ID)
+]
+
+#--- 16) Sort (descending) by cob_dt if you like, as in Python (ascending=False)
+setorder(df_agg, cur, -cob_dt)
+
+#--- 17) Add check column
+df_agg[, CheckChangeSum := AMT - AMT_prev]
+
+#--- 18) Overwrite the first row's columns with 0 (mimicking df_agg.loc[0, ...] = 0)
+df_agg[1, c("Change_EoM","AMT_INCREASED",
+            "AMT_DECREASED","CheckChangeSum") := 0]
+
+#--- 19) Finally, write out to CSV
+fwrite(df_agg, "4052_NP_OVD_jupyter_new.csv", sep=";")
+
+
+```
+```
+
+```{r}
+library(data.table)
+
+# 1) Set working directory
+setwd("M:/OE0836/OE0709_shared/OVD/Christian - calibration")
+
+#------------------------------------------------------------------------------
+# 2) Read CSVs and remove duplicates
+df       <- fread("ovd_SLSP.csv", sep=";", header=TRUE)
+df       <- unique(df)
+df_EURRON <- fread("EUR_RON.csv", sep=";", header=TRUE)
+df_EURRON <- unique(df_EURRON)
+
+#------------------------------------------------------------------------------
+# 3) Filter to desired MODEL_ID & FLG_NPE (example: "2160_RON_P_OVD", "N")
+df <- df[MODEL_ID == "2160_RON_P_OVD" & FLG_NPE == "N"]
+
+#------------------------------------------------------------------------------
+# 4) Rename columns to match your usage
+#    Suppose your Python rename was something like:
+#      t_bita_cob_dt   --> cob_dt
+#      amt_cust_princ  --> AMT
+#      ccy_cust_princ  --> cur
+#      cluster         --> MODEL_ID
+setnames(df,
+         old  = c("t_bita_cob_dt","amt_cust_princ","ccy_cust_princ","cluster"),
+         new  = c("cob_dt","AMT","cur","MODEL_ID"))
+
+#------------------------------------------------------------------------------
+# 5) Convert COB date column; keep only rows where cur == "EUR"
+df[, cob_dt := as.IDate(cob_dt, tryFormats=c("%Y-%m-%d","%d/%m/%Y"))]
+df <- df[cur == "EUR"]
+
+#------------------------------------------------------------------------------
+# 6) Sort by cob_dt, cur
+setorder(df, cob_dt, cur)
+
+#------------------------------------------------------------------------------
+# 7) (Optional) Write out “raw” data if you like
+fwrite(df, "2160_RON_P_OVD_rawdata.csv", sep=";")
+
+#------------------------------------------------------------------------------
+# 8) Create a “first_dt_on” by grouping on gid_cont
+dfint <- df[, .(first_dt_on = min(cob_dt, na.rm=TRUE)), by=gid_cont]
+df <- merge(df, dfint, by="gid_cont", all.x=TRUE)
+
+#------------------------------------------------------------------------------
+# 9) Create a “df_prev” with MonthEnd shifted date, plus a renamed MODEL_ID
+df_prev <- copy(df)
+# data.table does not have a direct “MonthEnd” offset built in.  One hack:
+# shift cob_dt to the last day of the same month:
+df_prev[, cob_dt := as.IDate(seq(as.Date(cob_dt), length.out=1, by="month")) - 1L]
+# ^ adjust if you want the literal month-end date.  Another approach is to use lubridate.
+
+# Rename model_id to track the “previous” version
+setnames(df_prev, old="MODEL_ID", new="MODEL_ID_prev")
+
+cluster <- "2140_CC"   # example from your code
+
+#------------------------------------------------------------------------------
+# 10) Aggregate the amounts in df (like groupby(...).sum()) to prepare for pivot
+df_grouped <- df[, .(AMT = sum(AMT, na.rm=TRUE)),
+                   by=.(cur, cob_dt, t_bita_tnt_cd, gid_cont, FLG_NPE, MODEL_ID, first_dt_on)]
+setorder(df_grouped, cur, cob_dt)
+
+#------------------------------------------------------------------------------
+# 11) Pivot to wide format (like pandas pivot_table)
+#     This will spread each cob_dt into a column of AMT
+df_wide <- dcast(
+  df_grouped,
+  formula   = cur + t_bita_tnt_cd + gid_cont + FLG_NPE + MODEL_ID + first_dt_on ~ cob_dt,
+  value.var = "AMT",
+  fill      = 0
+)
+
+#------------------------------------------------------------------------------
+# 12) Create a “previous wide” dataset by shifting columns one to the right 
+#     (similar to your Python code that loops and assigns df_prev_1[i] = df[i-1])
+df_wide_prev <- copy(df_wide)
+wide_cols <- setdiff(names(df_wide), c("cur","t_bita_tnt_cd","gid_cont","FLG_NPE","MODEL_ID","first_dt_on"))
+# Shift each date-column to “simulate” prior-month values
+df_wide_prev[, (wide_cols) := shift(.SD, n=1, fill=NA, type="lag"), .SDcols=wide_cols]
+
+#------------------------------------------------------------------------------
+# 13) Convert back to “long” form so we can merge
+df_long      <- melt(df_wide,
+                     id.vars       = c("cur","t_bita_tnt_cd","gid_cont","FLG_NPE","MODEL_ID","first_dt_on"),
+                     variable.name = "cob_dt",
+                     value.name    = "AMT")
+df_prev_long <- melt(df_wide_prev,
+                     id.vars       = c("cur","t_bita_tnt_cd","gid_cont","FLG_NPE","MODEL_ID","first_dt_on"),
+                     variable.name = "cob_dt",
+                     value.name    = "AMT_prev")
+
+# Convert “cob_dt” from character to Date or IDate
+df_long[,      cob_dt := as.IDate(cob_dt)]
+df_prev_long[, cob_dt := as.IDate(cob_dt)]
+
+# Merge them together
+df_final <- merge(df_long, df_prev_long,
+                  by = c("cur","t_bita_tnt_cd","gid_cont","FLG_NPE","MODEL_ID","first_dt_on","cob_dt"),
+                  all.x = TRUE)
+
+#------------------------------------------------------------------------------
+# 14) Fill NA with 0, compute difference columns, etc.
+df_final[is.na(AMT),      AMT := 0]
+df_final[is.na(AMT_prev), AMT_prev := 0]
+
+df_final[, Change_EoM    := AMT - AMT_prev]
+df_final[, AMT_INCREASED := fifelse(Change_EoM > 0, Change_EoM, 0)]
+df_final[, AMT_DECREASED := fifelse(Change_EoM < 0, Change_EoM, 0)]
+df_final[, AMT_NB        := fifelse(cob_dt == first_dt_on, Change_EoM, 0)]
+df_final[, AMT_closed    := fifelse(AMT == 0 & AMT_prev > 0, AMT_prev, 0)]
+
+#------------------------------------------------------------------------------
+# 15) Suppose you want to group and sum these final columns by (cur, cob_dt, MODEL_ID),
+#     mimicking your “df.groupby([...])[...].sum()”.
+df_agg <- df_final[,
+  .( AMT           = sum(AMT,           na.rm=TRUE),
+     AMT_prev      = sum(AMT_prev,      na.rm=TRUE),
+     Change_EoM    = sum(Change_EoM,    na.rm=TRUE),
+     AMT_INCREASED = sum(AMT_INCREASED, na.rm=TRUE),
+     AMT_DECREASED = sum(AMT_DECREASED, na.rm=TRUE),
+     AMT_NB        = sum(AMT_NB,        na.rm=TRUE),
+     AMT_closed    = sum(AMT_closed,    na.rm=TRUE)
+   ),
+   by=.(cur, cob_dt, MODEL_ID)
+]
+# Sort descending by cob_dt if desired
+setorder(df_agg, cur, -cob_dt)
+
+#------------------------------------------------------------------------------
+# 16) Optionally, zero out the first row’s difference columns (like .loc[0, ...] in Python)
+df_agg[1, c("Change_EoM","AMT_INCREASED","AMT_DECREASED") := 0]
+df_agg[1, CheckChangeSum := 0]
+
+#------------------------------------------------------------------------------
+# 17) Write aggregated results
+fwrite(df_agg, "2140_OVD_aggregated_no_change_1.csv", sep=";")
+
+#------------------------------------------------------------------------------
+# 18) Other filters or final checks: for example,
+#     slicing df_final for certain cob_dt dates
+dftest <- df_final[
+  cob_dt %in% as.IDate(c("2024-07-31","2024-08-31")) &
+  !is.na(AMT)
+]
+print(dftest)
+
+# or group again for a final summary
+df_agg_changed <- df_final[, 
+  .(AMT            = sum(AMT, na.rm=TRUE),
+    AMT_prev       = sum(AMT_prev, na.rm=TRUE),
+    Change_EoM     = sum(Change_EoM, na.rm=TRUE),
+    AMT_INCREASED  = sum(AMT_INCREASED, na.rm=TRUE),
+    AMT_DECREASED  = sum(AMT_DECREASED, na.rm=TRUE),
+    AMT_NB         = sum(AMT_NB, na.rm=TRUE),
+    AMT_closed     = sum(AMT_closed, na.rm=TRUE)),
+  by=.(cur, cob_dt, MODEL_ID)
+]
+setorder(df_agg_changed, MODEL_ID, cob_dt)
+print(df_agg_changed)
 
 ```
 
 ```{r}
+library(data.table)
+library(lubridate)  # Optional for month-end manipulations
 
-```
+#------------------------------------------------------------------------------
+# 1) Read & de-duplicate 
+#    (In Python: df = pd.read_csv('ovd_BCR.csv', sep=';').drop_duplicates())
+#------------------------------------------------------------------------------
+df       <- fread("ovd_BCR.csv", sep=";", header=TRUE)
+df       <- unique(df)
+df_EURRON <- fread("EUR_RON.csv", sep=";", header=TRUE)
+df_EURRON <- unique(df_EURRON)
 
-```{r}
+#------------------------------------------------------------------------------
+# 2) Filter to desired MODEL_ID & FLG_NPE (like df[df["MODEL_ID"]=="2160_RON_P_OVD"]
+#    & df[df["FLG_NPE"]=="N"])
+#------------------------------------------------------------------------------
+df <- df[MODEL_ID == "2160_RON_P_OVD" & FLG_NPE == "N"]
+
+#------------------------------------------------------------------------------
+# 3) Rename columns 
+#    (In Python: df.rename(columns={'T_BITA_COB_DT':'cob_dt','AMT_CUST_PRINC':'AMT','CCY_CUST_PRINC':'cur'}, ...))
+#------------------------------------------------------------------------------
+setnames(df,
+         old=c("T_BITA_COB_DT","AMT_CUST_PRINC","CCY_CUST_PRINC"),
+         new=c("cob_dt","AMT","cur"))
+
+# Rename the FX column in df_EURRON if needed
+# (In Python: df_EURRON.rename(columns={'RT_FX_FIX':'FX_EURRON'}, ...))
+setnames(df_EURRON,
+         old="RT_FX_FIX",
+         new="FX_EURRON")
+
+#------------------------------------------------------------------------------
+# 4) Parse date columns
+#    (In Python: df["cob_dt"] = pd.to_datetime(df["cob_dt"], infer_datetime_format=True))
+#------------------------------------------------------------------------------
+df[, cob_dt         := as.IDate(cob_dt,         tryFormats=c("%Y-%m-%d","%d/%m/%Y"))]
+df[, DT_ACC_OPN     := as.IDate(DT_ACC_OPN,     tryFormats=c("%Y-%m-%d","%d/%m/%Y"), optional=TRUE)]
+df_EURRON[, T_BITA_COB_DT := as.IDate(T_BITA_COB_DT, tryFormats=c("%Y-%m-%d","%d/%m/%Y"))]
+
+#------------------------------------------------------------------------------
+# 5) Replace commas in numeric columns, convert to numeric
+#    (In Python: df["AMT"] = df["AMT"].str.replace(',','.').astype(float))
+#------------------------------------------------------------------------------
+df[, AMT := as.numeric(gsub(",", ".", AMT))]
+df_EURRON[, FX_EURRON := as.numeric(gsub(",", ".", FX_EURRON))]
+
+#------------------------------------------------------------------------------
+# 6) Merge the FX table on matching date 
+#    (In Python: df = df.merge(df_EURRON[["T_BITA_COB_DT","FX_EURRON"]],
+#                              left_on="cob_dt", right_on="T_BITA_COB_DT"))
+#------------------------------------------------------------------------------
+# Sort if needed (like df_EURRON.sort_values in Python):
+setorder(df_EURRON, T_BITA_COB_DT)
+df <- merge(df, 
+            df_EURRON[, .(T_BITA_COB_DT, FX_EURRON)], 
+            by.x="cob_dt", by.y="T_BITA_COB_DT",
+            all.x=TRUE)
+
+# Convert the amounts (In Python: df["AMT"] = df["AMT"] / df["FX_EURRON"])
+df[, AMT := AMT / FX_EURRON]
+
+#------------------------------------------------------------------------------
+# 7) Derive “first_dt_on” by GID_CONT for any positive AMT
+#    (In Python: groupby min date where AMT>0)
+#------------------------------------------------------------------------------
+dfint <- df[AMT > 0, .(first_dt_on = min(cob_dt, na.rm=TRUE)), by=GID_CONT]
+df <- merge(df, dfint, by="GID_CONT", all.x=TRUE)
+
+#------------------------------------------------------------------------------
+# 8) Summarize the amounts by grouping, as your Python code does:
+#    df.groupby(["cur","cob_dt","T_BITA_TNT_CD","GID_CONT","DT_ACC_OPN","FLG_NPE","MODEL_ID","first_dt_on"])["AMT"].sum()
+#------------------------------------------------------------------------------
+df_summarized <- df[,
+  .(AMT = sum(AMT, na.rm=TRUE)),
+  by=.(cur, cob_dt, T_BITA_TNT_CD, GID_CONT, DT_ACC_OPN, FLG_NPE, MODEL_ID, first_dt_on)
+]
+setorder(df_summarized, cur, cob_dt)
+
+#------------------------------------------------------------------------------
+# 9) Pivot to wide (like df.pivot(index=..., columns="cob_dt", values="AMT"))
+#    in data.table we use dcast
+#------------------------------------------------------------------------------
+index_cols <- c("cur","T_BITA_TNT_CD","GID_CONT","DT_ACC_OPN","FLG_NPE","MODEL_ID","first_dt_on")
+df_wide <- dcast(
+  df_summarized,
+  formula = paste(paste(index_cols, collapse="+"), "~ cob_dt"),
+  value.var = "AMT",
+  fill = 0
+)
+
+#------------------------------------------------------------------------------
+# 10) Make a copy, shift each “date column” by 1 to create the “previous” columns
+#    (In Python: for i in range(1, len(df.columns)): df_prev[i] = df[i-1])
+#------------------------------------------------------------------------------
+df_prev_wide <- copy(df_wide)
+
+# Identify the pivoted date columns
+wide_date_cols <- setdiff(names(df_wide), index_cols)
+
+# Shift them by 1 (so col[i] = col[i-1], the first col becomes NA)
+df_prev_wide[, (wide_date_cols) := shift(.SD, n=1, fill=NA, type="lag"),
+             .SDcols=wide_date_cols]
+
+#------------------------------------------------------------------------------
+# 11) Convert both wide tables back to long form so we can join “AMT” and “AMT_prev”
+#    (In Python: df = df.stack(...).reset_index(), etc.)
+#------------------------------------------------------------------------------
+df_long <- melt(df_wide,
+                id.vars=index_cols,
+                variable.name="cob_dt",
+                value.name="AMT")
+
+df_prev_long <- melt(df_prev_wide,
+                     id.vars=index_cols,
+                     variable.name="cob_dt",
+                     value.name="AMT_prev")
+
+# Convert cob_dt from character to Date/IDate
+df_long[, cob_dt := as.IDate(cob_dt)]
+df_prev_long[, cob_dt := as.IDate(cob_dt)]
+
+# Merge them
+df_final <- merge(df_long, df_prev_long,
+                  by=c(index_cols, "cob_dt"),
+                  all.x=TRUE)
+
+#------------------------------------------------------------------------------
+# 12) Fill NA with 0, compute difference columns
+#    (In Python: df["AMT"] = df["AMT"].fillna(0), etc.)
+#------------------------------------------------------------------------------
+df_final[is.na(AMT),      AMT := 0]
+df_final[is.na(AMT_prev), AMT_prev := 0]
+
+df_final[, Change_EoM    := AMT - AMT_prev]
+df_final[, AMT_INCREASED := fifelse(Change_EoM > 0, Change_EoM, 0)]
+df_final[, AMT_DECREASED := fifelse(Change_EoM < 0, Change_EoM, 0)]
+
+# Example logic for “AMT_NB”:
+# (In Python you had a condition using DT_ACC_OPN + offsets.MonthEnd() >= cob_dt, etc.)
+# Let’s assume you want: if cob_dt == first_dt_on => “new business”
+df_final[, AMT_NB := fifelse(cob_dt == first_dt_on, Change_EoM, 0)]
+
+# For “AMT_closed” (like df.where(AMT==0 & AMT_prev>0, AMT_prev, 0))
+df_final[, AMT_closed := fifelse(AMT == 0 & AMT_prev > 0, AMT_prev, 0)]
+
+#------------------------------------------------------------------------------
+# 13) Final aggregation (like Python’s df.groupby(...).sum().reset_index())
+#------------------------------------------------------------------------------
+df_agg <- df_final[,
+  .( AMT           = sum(AMT,           na.rm=TRUE),
+     AMT_prev      = sum(AMT_prev,      na.rm=TRUE),
+     Change_EoM    = sum(Change_EoM,    na.rm=TRUE),
+     AMT_INCREASED = sum(AMT_INCREASED, na.rm=TRUE),
+     AMT_DECREASED = sum(AMT_DECREASED, na.rm=TRUE),
+     AMT_NB        = sum(AMT_NB,        na.rm=TRUE),
+     AMT_closed    = sum(AMT_closed,    na.rm=TRUE)
+   ),
+   by=.(cur, cob_dt, MODEL_ID)
+]
+setorder(df_agg, cur, -cob_dt)
+
+#------------------------------------------------------------------------------
+# 14) Optionally zero out the first row’s difference columns (like df_agg.loc[0, ...] = 0)
+#------------------------------------------------------------------------------
+if (nrow(df_agg) > 0) {
+  df_agg[1, c("Change_EoM","AMT_INCREASED","AMT_DECREASED") := 0]
+  df_agg[1, CheckChangeSum := 0]
+}
+
+#------------------------------------------------------------------------------
+# 15) Export final results
+#    (In Python: df_agg.to_csv('2160_RON_P_OVD_jupyter_RON_new.csv', sep=';'))
+#------------------------------------------------------------------------------
+fwrite(df_agg[cur=="RON"], "2160_RON_P_OVD_jupyter_RON_new.csv", sep=";")
+
+#------------------------------------------------------------------------------
+# 16) Example of date offset logic for “DT_ACC_OPN” + MonthEnd
+#    In Python: df["DT_ACC_OPN"] + pd.offsets.MonthEnd()
+#    In R, using lubridate: floor_date(x, "month") + months(1) - 1
+#    or there is also a ceiling_date/floor_date approach. E.g.:
+#------------------------------------------------------------------------------
+df_final[, DT_ACC_OPN_plusMonthEnd := (floor_date(DT_ACC_OPN, "month") + months(1) - days(1))]
 
 ```
 
